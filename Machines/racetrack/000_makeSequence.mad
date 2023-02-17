@@ -1,0 +1,210 @@
+!==========================================
+! Created on Feb 10, 2023
+! Authors: P. Belanger
+!==========================================
+option, echo=true, warn=true;
+option,echo,warn,info;
+
+!==========================================
+! USER-DEFINED VALUES
+!==========================================
+
+! Beam
+beam.bv       = 1      ;                   ! [ ]      | Beam direction (-1 for b2)
+beam.energy   = 7000   ;                   ! [GeV]    | Beam energy
+beam.Nb       = 1.1e11 ;                   ! [protons]| Bunch population
+beam.sigt     = 0.075  ;                   ! [m]      | Bunch length at collision
+beam.sige     = 1.1e-4 ;                   ! [s]      | Bunch energy variation
+beam.bunchsep = 25e-9  ;                   ! [s]      | Bunch separation in time 
+beam.emittn   = 2.5e-6 ;                   ! [rad]    | Normalized emittance
+
+
+
+
+!==========================================
+! Main Elements
+!==========================================
+
+
+! Drifts
+!******************************************
+l.d       = 0.25;
+
+d       : drift, l:= l.d ;
+dd      : drift, l:= 2*l.d ;
+!******************************************
+
+
+
+
+! Bending Magnets
+!******************************************
+l.mb      = 1 ;                             ! Length
+arc.ncell = 12;                             ! Number of FODO cell in one arc
+nbend     = (arc.ncell*2 + 1)*2 ;        ! 2 per cell
+
+mb : sbend, l:= l.mb, angle:= beam.bv*(twopi/nbend);
+mb_null : drift, l:= l.mb ;
+!******************************************
+
+
+! Quadrupole Magnets
+!******************************************
+l.mq      = 0.5;
+kq.f      =  2.8/5;
+kq.d      = -2.8/5;
+
+! General FODO quadrupoles
+mq.f       : quadrupole, l:= l.mq, k1:= kq.f;
+mq.d       : quadrupole, l:= l.mq, k1:= kq.d;
+!******************************************
+
+
+! Sextupole Magnets
+!******************************************
+k.ms  = 30.0;
+
+ms    : multipole, knl := {0,0,k.ms};
+!******************************************
+
+
+! Octupole Magnets
+!******************************************
+k.mo  = 0.0;
+
+mo    : multipole, knl := {0,0,0,k.mo};
+!******************************************
+
+
+
+
+
+!==========================================
+! Defining beam
+!==========================================
+beam.gamma_r := 1 + beam.energy/pmass   ;
+beam.emitt   := beam.emittn/beam.gamma_r;
+
+Beam,   particle = proton,
+        energy   = beam.energy,
+        sigt     = beam.sigt,
+        bv       = beam.bv,
+        npart    = beam.Nb,
+        sige     = beam.sige,
+        ex       = beam.emitt,
+        ey       = beam.emitt;
+
+
+
+!==========================================
+! Defining sequence
+!==========================================
+
+! FODO CELL
+!------------
+fodo  : line:= (mq.f , d, ms , d , mb , dd , mq.d , mq.d , d, ms, d , mb , dd , mq.f);
+dofo  : line:= (mq.d , d, ms, d , mb , dd , mq.f , mq.f , d, ms, d , mb , dd , mq.d);
+
+ss_fodo  : line:= (mq.f , dd , mb_null , dd , mq.d , mq.d , dd , mb_null , dd , mq.f);
+ss_dofo  : line:= (mq.d , dd , mb_null , dd , mq.f , mq.f , dd , mb_null , dd , mq.d);
+
+
+beta_meas:marker;
+fodo_match: line:= (beta_meas,mq.f , d, ms, d , mb , dd , mq.d , mq.d , d, ms, d , mb , dd , mq.f);
+
+
+! Arcs: '6*' needs to be adjusted to be (arc.ncell/2)
+!------------
+arc             : line = (6*dofo , mq.d , d, ms, d , mb , dd , mq.f , 6*fodo);
+arc_match       : line = (mq.d , d, ms, d , mb , dd , mq.f);
+
+
+! To join the arcs, we need and extra mq.f,mq.d. Bend is split to have a centered marker (ip3 and ip7)
+arc_joint : line = (mq.f,dd,mb_null,dd,mq.d);
+
+
+! Straigt section:
+ss_up   : line = (1*ss_dofo , mq.d , dd , mb_null , dd , mq.f , 1*ss_fodo);
+ss_down : line = (1*ss_dofo , mq.d , dd , mb_null , dd , mq.f , 1*ss_fodo);
+
+
+
+! Final sequence
+!------------
+s.ss:marker;
+e.ss:marker;
+s.trombone:marker;
+e.trombone:marker;
+
+
+
+!*************************
+racetrack      : line=(
+                    s.ss,ss_up, e.ss,
+                    arc_joint, arc ,arc_joint,
+                    s.trombone, ss_down, e.trombone,
+                    arc_joint, arc ,arc_joint
+                    );                
+!*************************
+
+
+
+! Adding extra elements to the sequence
+!*************************
+! use, sequence = racetrack;
+! seqedit, sequence = racetrack;
+!     flatten;
+!         cycle, start = ip3;
+!     flatten;
+! endedit;
+!*************************
+
+!==========================================
+! Matching the optics around the ring
+!==========================================
+
+! Matching fodo cell to have .3 .3 phase advance
+!-----------------------------------------
+! Qx_fodo = 0.3256;
+! Qy_fodo = 0.323;
+
+Qx_fodo = 0.333;
+Qy_fodo = 0.333;
+
+use, period=fodo_match;
+match;
+    vary, name=kq.f,step=.001,UPPER=10,LOWER=-10;
+    vary, name=kq.d,step=.001,UPPER=10,LOWER=-10;
+    
+    constraint,range=#end,mux=Qx_fodo,muy=Qy_fodo;
+    
+    lmdif,calls=100;
+endmatch;
+! Saving beta at the entrance of the arc
+savebeta, label = betarc, place = beta_meas;
+twiss;
+!------------------------------------------
+
+
+
+!==========================================
+! Cycle to start at ip3
+!==========================================
+! use, sequence = racetrack;
+! seqedit, sequence = lhcb1;
+!     flatten;
+!         cycle, start = ip3;
+!     flatten;
+! endedit;
+
+
+
+
+
+!==========================================
+! Makethin
+!==========================================
+
+use, sequence=racetrack;
+select,flag=makethin,slice=2,range=#s/#e;
+makethin,sequence=racetrack;

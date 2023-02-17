@@ -1,0 +1,17 @@
+Executables/**
+*.ipynb_checkpoint*
+*__pycache*
+*.c
+*.o
+
+# Mask management
+Data/Checks/**
+Data/Mask/**
+!Data/Mask/Tracking_tools/**
+!Data/Mask/000_pymask_rich.py
+!Data/Mask/000_pymask.py
+!Data/Mask/bbcw.py
+!Data/Mask/config.yaml
+!Data/Mask/optics_specific_tools.py
+!Data/Mask/readme.md
+!Data/Mask/run_pymask.py
